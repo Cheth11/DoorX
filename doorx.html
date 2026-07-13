@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+  <head>
+    <title>DoorX</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+  </head>
+
+  <body
+    style="
+      background: black;
+      color: white;
+      text-align: center;
+      font-family: sans-serif;
+    "
+  >
+    <h1>DoorX AI Access</h1>
+    <video id="video" width="400" autoplay muted></video>
+    <h2 id="status">Loading models...</h2>
+
+    <script>
+      const video = document.getElementById("video");
+      let faceMatcher = null;
+      let labeledDescriptors = [];
+      let lastResult = null;
+
+      // 🚀 START SYSTEM
+      async function start() {
+        const MODEL_URL =
+          "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model";
+
+        document.getElementById("status").innerText = "Loading AI models...";
+
+        await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+
+        document.getElementById("status").innerText = "Starting camera...";
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
+        video.srcObject = stream;
+
+        // Wait 3 sec → capture YOUR face
+        setTimeout(async () => {
+          const desc = await getDescriptor();
+
+          if (!desc) {
+            document.getElementById("status").innerText =
+              "No face detected. Refresh.";
+            return;
+          }
+
+          labeledDescriptors.push(
+            new faceapi.LabeledFaceDescriptors("chethan", [desc]),
+          );
+
+          faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5);
+
+          document.getElementById("status").innerText =
+            "Face learned. Show face again.";
+
+          detectLoop();
+        }, 3000);
+      }
+
+      // 🧠 GET FACE VECTOR
+      async function getDescriptor() {
+        const det = await faceapi
+          .detectSingleFace(video)
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        return det ? det.descriptor : null;
+      }
+
+      // 🔁 DETECTION LOOP
+      async function detectLoop() {
+        setInterval(async () => {
+          const det = await faceapi
+            .detectSingleFace(video)
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+
+          if (!det || !faceMatcher) {
+            document.getElementById("status").innerText = "No face";
+            return;
+          }
+
+          const match = faceMatcher.findBestMatch(det.descriptor);
+
+          if (match.label !== "unknown") {
+            if (lastResult !== "auth") {
+              lastResult = "auth";
+              document.getElementById("status").innerText = "✅ ACCESS GRANTED";
+              triggerDoor("open");
+            }
+          } else {
+            if (lastResult !== "deny") {
+              lastResult = "deny";
+              document.getElementById("status").innerText = "❌ ACCESS DENIED";
+              triggerDoor("denied");
+            }
+          }
+        }, 1500);
+      }
+
+      // 🔌 SEND TO BACKEND
+      function triggerDoor(state) {
+        fetch("http://localhost:5000/access", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: state === "open" ? "Chethan" : "Unknown",
+            decision: state === "open" ? "grant" : "deny",
+            confidence: "auto",
+          }),
+        })
+          .then(() => console.log("Sent to backend:", state))
+          .catch((err) => console.log("Backend error:", err));
+      }
+
+      // START
+      start();
+    </script>
+  </body>
+</html>
